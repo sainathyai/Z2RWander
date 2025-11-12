@@ -1,0 +1,21 @@
+{
+  "name": "wander-dev-environment",
+  "version": "1.0.0",
+  "description": "Zero-to-Running Developer Environment",
+  "private": true,
+  "scripts": {
+    "lint": "npm run lint --workspaces",
+    "lint-fix": "npm run lint-fix --workspaces",
+    "format": "npm run format --workspaces",
+    "prepare": "husky install"
+  },
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "devDependencies": {
+    "husky": "^9.1.6",
+    "prettier": "^3.3.3"
+  }
+}
+
