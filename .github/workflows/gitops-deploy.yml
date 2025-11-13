@@ -1,0 +1,184 @@
+name: GitOps Deployment
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'static-app/**'
+      - '.github/workflows/gitops-deploy.yml'
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-west-2
+  ECR_REPOSITORY: wander-static-app
+  K8S_MANIFEST_PATH: k8s/deployments/static-app-deployment.yaml
+  K8S_BRANCH: k8s-manifests
+
+jobs:
+  build-and-push:
+    name: Build and Push to ECR
+    runs-on: ubuntu-latest
+    
+    outputs:
+      image-tag: ${{ steps.build.outputs.image-tag }}
+      image-digest: ${{ steps.build.outputs.image-digest }}
+      version: ${{ steps.version.outputs.version }}
+      build-number: ${{ steps.version.outputs.build }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Generate version and build number
+        id: version
+        run: |
+          VERSION=$(date +%Y.%m.%d)
+          BUILD=$(date +%H%M%S)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "build=$BUILD" >> $GITHUB_OUTPUT
+          echo "Generated version: $VERSION, build: $BUILD"
+
+      - name: Build, tag, and push image to Amazon ECR
+        id: build
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ steps.version.outputs.version }}-${{ steps.version.outputs.build }}
+        run: |
+          cd static-app
+          
+          # Build Docker image
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          
+          # Push to ECR
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          
+          # Output image info
+          echo "image-tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+          DIGEST=$(docker inspect $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG --format='{{index .RepoDigests 0}}' | cut -d'@' -f2)
+          echo "image-digest=$DIGEST" >> $GITHUB_OUTPUT
+          
+          echo "✅ Image pushed: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+  update-k8s-manifest:
+    name: Update Kubernetes Manifest
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+
+      - name: Checkout k8s-manifests branch
+        run: |
+          git fetch origin ${{ env.K8S_BRANCH }}:${{ env.K8S_BRANCH }} || true
+          git checkout ${{ env.K8S_BRANCH }} || git checkout -b ${{ env.K8S_BRANCH }}
+
+      - name: Get AWS Account ID
+        id: aws-account
+        run: |
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text --region ${{ env.AWS_REGION }})
+          echo "account-id=$AWS_ACCOUNT_ID" >> $GITHUB_OUTPUT
+
+      - name: Copy manifests from main branch if needed
+        run: |
+          # Copy k8s directory structure from main branch if it doesn't exist
+          if [ ! -d "k8s" ]; then
+            git checkout main -- k8s/ 2>/dev/null || echo "k8s directory not in main branch"
+          fi
+          # Ensure directories exist
+          mkdir -p k8s/deployments k8s/services
+
+      - name: Update Kubernetes deployment manifest
+        env:
+          AWS_ACCOUNT_ID: ${{ steps.aws-account.outputs.account-id }}
+          IMAGE_TAG: ${{ needs.build-and-push.outputs.image-tag }}
+          VERSION: ${{ needs.build-and-push.outputs.version }}
+          BUILD: ${{ needs.build-and-push.outputs.build-number }}
+        run: |
+          # Get the full image URL
+          FULL_IMAGE="$AWS_ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG"
+          
+          # Update or create deployment manifest
+          if [ -f "${{ env.K8S_MANIFEST_PATH }}" ]; then
+            # Update existing manifest
+            if [[ "$OSTYPE" == "darwin"* ]]; then
+              sed -i '' "s|image:.*wander-static-app.*|image: $FULL_IMAGE|g" "${{ env.K8S_MANIFEST_PATH }}"
+            else
+              sed -i "s|image:.*wander-static-app.*|image: $FULL_IMAGE|g" "${{ env.K8S_MANIFEST_PATH }}"
+            fi
+          else
+            # Copy from main branch if exists
+            git checkout main -- "${{ env.K8S_MANIFEST_PATH }}" 2>/dev/null || echo "Manifest not in main branch"
+            if [ -f "${{ env.K8S_MANIFEST_PATH }}" ]; then
+              # Update the copied manifest
+              if [[ "$OSTYPE" == "darwin"* ]]; then
+                sed -i '' "s|image:.*wander-static-app.*|image: $FULL_IMAGE|g" "${{ env.K8S_MANIFEST_PATH }}"
+              else
+                sed -i "s|image:.*wander-static-app.*|image: $FULL_IMAGE|g" "${{ env.K8S_MANIFEST_PATH }}"
+              fi
+            fi
+          fi
+          
+          echo "✅ Updated image to: $FULL_IMAGE"
+
+      - name: Commit and push changes
+        run: |
+          git add k8s/
+          git diff --staged --quiet || git commit -m "chore: update static-app image to ${{ needs.build-and-push.outputs.version }}-${{ needs.build-and-push.outputs.build-number }}
+
+          - Image: ${{ needs.build-and-push.outputs.image-tag }}
+          - Version: ${{ needs.build-and-push.outputs.version }}
+          - Build: ${{ needs.build-and-push.outputs.build-number }}
+          - Triggered by: ${{ github.sha }}"
+          
+          git push origin ${{ env.K8S_BRANCH }}
+          
+          echo "✅ Pushed updated manifest to ${{ env.K8S_BRANCH }} branch"
+
+  notify:
+    name: Notify Deployment
+    needs: [build-and-push, update-k8s-manifest]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: Deployment Summary
+        run: |
+          echo "## 🚀 GitOps Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Image:** \`${{ needs.build-and-push.outputs.image-tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ needs.build-and-push.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Build:** ${{ needs.build-and-push.outputs.build-number }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Argo CD will automatically sync the changes to EKS." >> $GITHUB_STEP_SUMMARY
+

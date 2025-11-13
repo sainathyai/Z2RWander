@@ -1,31 +1,75 @@
 # Wander: Zero-to-Running Developer Environment
 # Makefile for managing the development environment
 
-.PHONY: help dev down logs clean clean-all teardown status ps top restart rebuild shell check-deps
+.PHONY: help dev down logs clean clean-all teardown status ps top restart rebuild shell check-deps dashboard open-dashboard
 
-# Colors for output
+# Detect OS
+ifeq ($(OS),Windows_NT)
+    DETECTED_OS := Windows
+    SHELL := cmd.exe
+    WHERE := where
+    CHECK_DOCKER := where docker >nul 2>&1
+    CHECK_COMPOSE := where docker-compose >nul 2>&1 || docker compose version >nul 2>&1
+    DOCKER_INFO := docker info >nul 2>&1
+    SLEEP := timeout /t
+    CD_CMD := cd
+    AND := &&
+else
+    DETECTED_OS := Unix
+    WHERE := which
+    CHECK_DOCKER := command -v docker >/dev/null 2>&1
+    CHECK_COMPOSE := command -v docker-compose >/dev/null 2>&1 || command -v docker compose >/dev/null 2>&1
+    DOCKER_INFO := docker info >/dev/null 2>&1
+    SLEEP := sleep
+    CD_CMD := cd
+    AND := ;
+endif
+
+# Colors for output (Windows doesn't support ANSI colors in cmd, but PowerShell does)
 GREEN := \033[0;32m
 YELLOW := \033[0;33m
 RED := \033[0;31m
 BLUE := \033[0;34m
-NC := \033[0m # No Color
+NC := \033[0m
 
 help: ## Show this help message
+ifeq ($(OS),Windows_NT)
+	@powershell -Command "Write-Host '================================================================================' -ForegroundColor Cyan; Write-Host '  Wander Developer Environment - Available Commands' -ForegroundColor Cyan; Write-Host '================================================================================' -ForegroundColor Cyan; Write-Host ''"
+	@powershell -Command "Get-Content Makefile | Select-String -Pattern '^[a-zA-Z_-]+:.*?##' | ForEach-Object { $$_ -replace '^([^:]+):.*?##\s*(.+)', '  $$1 - $$2' } | Sort-Object"
+	@powershell -Command "Write-Host ''"
+else
 	@echo "$(BLUE)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(NC)"
 	@echo "$(BLUE)  🚀 Wander Developer Environment - Available Commands$(NC)"
 	@echo "$(BLUE)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(NC)"
 	@echo ""
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-20s$(NC) %s\n", $$1, $$2}'
 	@echo ""
+endif
 
 check-deps: ## Check if Docker is running
+ifeq ($(OS),Windows_NT)
+	@powershell -Command "Write-Host 'Checking dependencies...' -ForegroundColor Blue"
+	@where docker >nul 2>&1 || (powershell -Command "Write-Host 'Docker is not installed' -ForegroundColor Red" && exit /b 1)
+	@docker info >nul 2>&1 || (powershell -Command "Write-Host 'Docker is not running. Please start Docker Desktop.' -ForegroundColor Red" && exit /b 1)
+	@where docker-compose >nul 2>&1 || docker compose version >nul 2>&1 || (powershell -Command "Write-Host 'Docker Compose is not installed' -ForegroundColor Red" && exit /b 1)
+	@powershell -Command "Write-Host 'All dependencies are available' -ForegroundColor Green"
+else
 	@echo "$(BLUE)🔍 Checking dependencies...$(NC)"
 	@command -v docker >/dev/null 2>&1 || { echo "$(RED)❌ Docker is not installed$(NC)"; exit 1; }
 	@docker info >/dev/null 2>&1 || { echo "$(RED)❌ Docker is not running. Please start Docker Desktop.$(NC)"; exit 1; }
 	@command -v docker-compose >/dev/null 2>&1 || command -v docker compose >/dev/null 2>&1 || { echo "$(RED)❌ Docker Compose is not installed$(NC)"; exit 1; }
 	@echo "$(GREEN)✅ All dependencies are available$(NC)"
+endif
 
 dev: check-deps ## Start all services (use PROFILE=minimal|backend|full)
+ifeq ($(OS),Windows_NT)
+	@powershell -Command "Write-Host ''; Write-Host 'Starting dashboard backend...' -ForegroundColor Yellow; Start-Process powershell -ArgumentList '-NoExit', '-Command', 'node scripts/dashboard-backend.js' -WindowStyle Minimized"
+	@powershell -Command "Start-Sleep -Seconds 2; Write-Host 'Opening dashboard in new window...' -ForegroundColor Yellow; $$htmlPath = Join-Path (Get-Location) 'dashboard.html'; Start-Process $$htmlPath; Write-Host 'Dashboard opened! Pausing for 5 seconds so you can see it...' -ForegroundColor Cyan; Start-Sleep -Seconds 5"
+	@powershell -NoProfile -Command "$$p = if ('$(PROFILE)' -eq '') { 'full' } else { '$(PROFILE)' }; if ($$p -eq 'minimal') { Write-Host 'Starting Minimal Profile (Frontend only)...' -ForegroundColor Cyan; Set-Location infrastructure; docker-compose -f docker-compose.minimal.yml up -d } elseif ($$p -eq 'backend') { Write-Host 'Starting Backend Profile (Backend + DB + Redis)...' -ForegroundColor Cyan; Set-Location infrastructure; docker-compose -f docker-compose.backend.yml up -d } else { Write-Host 'Starting Full Stack Profile...' -ForegroundColor Cyan; Set-Location infrastructure; docker-compose up -d }"
+	@powershell -Command "Write-Host ''; Write-Host 'Services starting...' -ForegroundColor Green; Write-Host 'You can monitor the installation progress in the dashboard window!' -ForegroundColor Cyan; Start-Sleep -Seconds 3"
+	@$(MAKE) status
+	@powershell -Command "Write-Host ''; Write-Host 'Environment Ready!' -ForegroundColor Green; Write-Host ''; Write-Host 'Frontend Dashboard: http://localhost:3000' -ForegroundColor Blue; Write-Host 'Backend API:        http://localhost:8080' -ForegroundColor Blue; Write-Host 'API Dashboard:      http://localhost:8080/dashboard' -ForegroundColor Blue; Write-Host 'Health Check:       http://localhost:8080/health' -ForegroundColor Blue; Write-Host ''"
+else
 	@PROFILE=$(or $(PROFILE),full); \
 	if [ "$$PROFILE" = "minimal" ]; then \
 		echo "$(BLUE)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(NC)"; \
@@ -58,20 +102,39 @@ dev: check-deps ## Start all services (use PROFILE=minimal|backend|full)
 		cd infrastructure && docker-compose up -d; \
 	fi
 	@echo ""
+	@echo "$(YELLOW)Starting dashboard backend...$(NC)"
+	@node scripts/dashboard-backend.js > /dev/null 2>&1 &
+	@sleep 2
+	@echo "$(YELLOW)🌐 Opening dashboard in new window...$(NC)"
+	@xdg-open dashboard.html 2>/dev/null || open dashboard.html 2>/dev/null || echo "$(YELLOW)Please open dashboard.html in your browser$(NC)"
+	@echo "$(CYAN)💡 Dashboard opened! Pausing for 5 seconds so you can see it...$(NC)"
+	@sleep 5
 	@echo "$(GREEN)✅ Services starting...$(NC)"
 	@echo "$(YELLOW)⏳ Waiting for services to be healthy...$(NC)"
-	@sleep 5
+	@echo "$(CYAN)💡 You can monitor the installation progress in the dashboard window!$(NC)"
+	@sleep 3
 	@$(MAKE) status
 	@echo ""
 	@echo "$(GREEN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(NC)"
 	@echo "$(GREEN)  ✅ Environment Ready!$(NC)"
 	@echo "$(GREEN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(NC)"
 	@echo ""
-	@echo "$(BLUE)🌐 Frontend:$(NC)  http://localhost:3000"
-	@echo "$(BLUE)🔧 Backend:$(NC)   http://localhost:8080"
-	@echo "$(BLUE)📊 Health:$(NC)    http://localhost:8080/health"
+	@echo "$(BLUE)🌐 Frontend Dashboard:$(NC)  http://localhost:3000"
+	@echo "$(BLUE)🔧 Backend API:$(NC)         http://localhost:8080"
+	@echo "$(BLUE)📊 API Dashboard:$(NC)       http://localhost:8080/dashboard"
+	@echo "$(BLUE)💚 Health Check:$(NC)        http://localhost:8080/health"
 	@echo ""
 	@echo "$(YELLOW)💡 Tip: Run 'make logs' to see live logs$(NC)"
+endif
+
+dashboard: open-dashboard ## Open the monitoring dashboard in browser
+open-dashboard: ## Open dashboard in browser
+ifeq ($(OS),Windows_NT)
+	@powershell -Command "Write-Host 'Opening dashboard in browser...' -ForegroundColor Yellow; Start-Process 'http://localhost:3000'"
+else
+	@echo "$(YELLOW)Opening dashboard in browser...$(NC)"
+	@xdg-open http://localhost:3000 2>/dev/null || open http://localhost:3000 2>/dev/null || echo "$(YELLOW)Please open http://localhost:3000 in your browser$(NC)"
+endif
 
 down: ## Stop all services (use PROFILE=minimal|backend|full)
 	@PROFILE=$(or $(PROFILE),full); \
@@ -101,12 +164,16 @@ logs-redis: ## Show logs from Redis only
 	@cd infrastructure && docker-compose logs -f redis
 
 status: ## Show status of all services
+ifeq ($(OS),Windows_NT)
+	@powershell -Command "Write-Host 'Service Status' -ForegroundColor Cyan; cd infrastructure; docker-compose ps; Write-Host ''; Write-Host 'Run make logs to see detailed logs' -ForegroundColor Yellow"
+else
 	@echo "$(BLUE)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(NC)"
 	@echo "$(BLUE)  📊 Service Status$(NC)"
 	@echo "$(BLUE)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(NC)"
 	@cd infrastructure && docker-compose ps
 	@echo ""
 	@echo "$(YELLOW)💡 Run 'make logs' to see detailed logs$(NC)"
+endif
 
 ps: status ## Alias for status command
 
@@ -267,16 +334,28 @@ reset-db: ## Reset database (drop all tables, recreate, and seed)
 	@echo "$(GREEN)✅ Database reset complete!$(NC)"
 
 clean: ## Remove all containers, volumes, and networks
+ifeq ($(OS),Windows_NT)
+	@powershell -Command "Write-Host 'Cleaning up...' -ForegroundColor Yellow; Write-Host 'This will remove all containers, volumes, and networks' -ForegroundColor Red"
+	@cd infrastructure && docker-compose down -v --remove-orphans
+	@powershell -Command "Write-Host 'Cleanup complete' -ForegroundColor Green"
+else
 	@echo "$(YELLOW)🧹 Cleaning up...$(NC)"
 	@echo "$(RED)⚠️  This will remove all containers, volumes, and networks$(NC)"
 	@cd infrastructure && docker-compose down -v --remove-orphans
 	@echo "$(GREEN)✅ Cleanup complete$(NC)"
+endif
 
-clean-all: ## Remove everything including images (complete teardown)
+clean-all: check-deps ## Remove everything including images (complete teardown)
+ifeq ($(OS),Windows_NT)
+	@powershell -Command "Write-Host 'Complete Teardown - This will remove EVERYTHING!' -ForegroundColor Red; Write-Host 'Removing containers, volumes, networks, and images...' -ForegroundColor Yellow"
+	@cd infrastructure && docker-compose down --rmi all -v --remove-orphans
+	@powershell -Command "Write-Host 'Complete teardown done! All containers, volumes, and images removed.' -ForegroundColor Green"
+else
 	@echo "$(RED)⚠️  Complete Teardown - This will remove EVERYTHING!$(NC)"
 	@echo "$(YELLOW)🧹 Removing containers, volumes, networks, and images...$(NC)"
 	@cd infrastructure && docker-compose down --rmi all -v --remove-orphans
 	@echo "$(GREEN)✅ Complete teardown done! All containers, volumes, and images removed.$(NC)"
+endif
 
 teardown: clean-all ## Complete teardown - removes everything (alias for clean-all)
 

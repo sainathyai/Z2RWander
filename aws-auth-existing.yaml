@@ -1,0 +1,15 @@
+﻿apiVersion: v1
+data:
+  mapRoles: |
+    - rolearn: arn:aws:iam::971422717446:role/wander-cluster-node-role
+      groups:
+      - system:bootstrappers
+      - system:nodes
+      username: system:node:{{EC2PrivateDNSName}}
+kind: ConfigMap
+metadata:
+  creationTimestamp: "2025-11-13T04:27:45Z"
+  name: aws-auth
+  namespace: kube-system
+  resourceVersion: "967"
+  uid: f396b53b-ec83-4b68-affc-49967c3f5741

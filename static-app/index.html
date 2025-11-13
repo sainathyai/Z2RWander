@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wander GitOps Demo</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            transition: background 0.5s ease;
+        }
+
+        .container {
+            text-align: center;
+            padding: 40px;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 600px;
+            width: 90%;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 2.5em;
+        }
+
+        .color-box {
+            width: 200px;
+            height: 200px;
+            margin: 30px auto;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            transition: all 0.3s ease;
+            background-color: #ef4444;
+        }
+
+        .info {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+        }
+
+        .info p {
+            margin: 10px 0;
+            color: #666;
+            font-size: 1.1em;
+        }
+
+        .version {
+            margin-top: 20px;
+            padding: 10px;
+            background: #e9ecef;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            color: #495057;
+        }
+
+        .deployment-info {
+            margin-top: 20px;
+            padding: 15px;
+            background: #d4edda;
+            border-left: 4px solid #28a745;
+            border-radius: 5px;
+            text-align: left;
+        }
+
+        .deployment-info h3 {
+            color: #155724;
+            margin-bottom: 10px;
+        }
+
+        .deployment-info ul {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        .deployment-info li {
+            margin: 5px 0;
+            color: #155724;
+        }
+
+        .deployment-info li:before {
+            content: "✓ ";
+            color: #28a745;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Wander GitOps Demo</h1>
+        
+        <div class="color-box" id="colorBox"></div>
+        
+        <div class="info">
+            <p><strong>This is a GitOps demonstration!</strong></p>
+            <p>Change the background color in the code, commit, and watch it deploy automatically.</p>
+        </div>
+
+        <div class="version">
+            <strong>Version:</strong> <span id="version">1.0.0</span><br>
+            <strong>Build:</strong> <span id="build">BUILD_NUMBER</span><br>
+            <strong>Deployed:</strong> <span id="deployed">DEPLOY_TIME</span>
+        </div>
+
+        <div class="deployment-info">
+            <h3>GitOps Workflow:</h3>
+            <ul>
+                <li>Commit changes to GitHub</li>
+                <li>GitHub Actions builds Docker image</li>
+                <li>Image pushed to AWS ECR</li>
+                <li>Argo CD detects changes</li>
+                <li>Automatic deployment to EKS</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        // Get version info from environment or use defaults
+        const version = 'VERSION_PLACEHOLDER' || '1.0.0';
+        const build = 'BUILD_PLACEHOLDER' || new Date().toISOString().split('T')[0];
+        const deployed = 'DEPLOY_TIME_PLACEHOLDER' || new Date().toLocaleString();
+
+        document.getElementById('version').textContent = version;
+        document.getElementById('build').textContent = build;
+        document.getElementById('deployed').textContent = deployed;
+
+        // Color from environment variable or default
+        const color = 'COLOR_PLACEHOLDER' || '#667eea';
+        document.getElementById('colorBox').style.backgroundColor = color;
+    </script>
+</body>
+</html>
+

@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: static-app-deployment
+  namespace: wander
+  labels:
+    app: static-app
+    component: demo
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: static-app
+  template:
+    metadata:
+      labels:
+        app: static-app
+        component: demo
+    spec:
+      containers:
+      - name: static-app
+        image: 971422717446.dkr.ecr.us-west-2.amazonaws.com/wander-static-app:latest
+        # This will be automatically updated by GitHub Actions
+        ports:
+        - containerPort: 80
+          name: http
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+        env:
+        - name: VERSION
+          value: "1.0.0"
+        - name: BUILD_NUMBER
+          value: "initial"
+        - name: DEPLOY_TIME
+          value: "2024-01-01 00:00:00"
+

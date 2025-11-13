@@ -83,7 +83,8 @@ function checkHttpEndpoint(url: string): Promise<boolean> {
 
 // Setup progress endpoint
 setupRouter.get('/progress', async (req, res) => {
-  const services: ServiceProgress[] = [
+  try {
+    const services: ServiceProgress[] = [
     {
       name: 'PostgreSQL Database',
       status: 'pending',
@@ -118,46 +119,86 @@ setupRouter.get('/progress', async (req, res) => {
   for (const service of services) {
     if (!service.containerName) continue;
 
-    // Check via HTTP endpoints instead of Docker commands (more reliable in containers)
+    // Check via connection/HTTP endpoints (works from within containers)
     if (service.containerName === 'wander-postgres') {
-      // Check database via backend connection
+      // Check database connection - if it fails, container is likely stopped/removed
       try {
         const { dbClient } = await import('../db/client.js');
         await dbClient.query('SELECT 1');
         service.status = 'healthy';
         service.progress = 100;
         service.message = 'Database connected and responding';
-      } catch {
-        service.status = 'starting';
-        service.progress = 50;
-        service.message = 'Waiting for database connection...';
+      } catch (error) {
+        // Connection failed - check if we can determine why
+        const containerStatus = await checkContainerStatus(service.containerName);
+        if (containerStatus === 'not-found') {
+          service.status = 'error';
+          service.progress = 0;
+          service.message = 'Container not found (may have been removed)';
+        } else if (containerStatus === 'stopped') {
+          service.status = 'unhealthy';
+          service.progress = 0;
+          service.message = 'Container stopped';
+        } else {
+          // Container might be running but not ready, or Docker check failed
+          service.status = 'starting';
+          service.progress = 50;
+          service.message = 'Waiting for database connection...';
+        }
       }
     } else if (service.containerName === 'wander-redis') {
-      // Check Redis via backend connection
+      // Check Redis connection - if it fails, container is likely stopped/removed
       try {
         const { redisClient } = await import('../db/redis.js');
         await redisClient.ping();
         service.status = 'healthy';
         service.progress = 100;
         service.message = 'Redis connected and responding';
-      } catch {
-        service.status = 'starting';
-        service.progress = 50;
-        service.message = 'Waiting for Redis connection...';
+      } catch (error) {
+        // Connection failed - check if we can determine why
+        const containerStatus = await checkContainerStatus(service.containerName);
+        if (containerStatus === 'not-found') {
+          service.status = 'error';
+          service.progress = 0;
+          service.message = 'Container not found (may have been removed)';
+        } else if (containerStatus === 'stopped') {
+          service.status = 'unhealthy';
+          service.progress = 0;
+          service.message = 'Container stopped';
+        } else {
+          // Container might be running but not ready, or Docker check failed
+          service.status = 'starting';
+          service.progress = 50;
+          service.message = 'Waiting for Redis connection...';
+        }
       }
     } else if (service.containerName === 'wander-backend') {
+      // Check HTTP endpoint - if it fails, container is likely stopped/removed
       const isBackendHealthy = await checkHttpEndpoint('http://localhost:8080/health');
       if (isBackendHealthy) {
         service.status = 'healthy';
         service.progress = 100;
         service.message = 'API is responding';
       } else {
-        service.status = 'starting';
-        service.progress = 70;
-        service.message = 'Backend starting up...';
+        // HTTP check failed - check container status if possible
+        const containerStatus = await checkContainerStatus(service.containerName);
+        if (containerStatus === 'not-found') {
+          service.status = 'error';
+          service.progress = 0;
+          service.message = 'Container not found (may have been removed)';
+        } else if (containerStatus === 'stopped') {
+          service.status = 'unhealthy';
+          service.progress = 0;
+          service.message = 'Container stopped';
+        } else {
+          // Container might be running but not ready, or Docker check failed
+          service.status = 'starting';
+          service.progress = 70;
+          service.message = 'Backend starting up...';
+        }
       }
     } else if (service.containerName === 'wander-frontend') {
-      // For frontend, check via HTTP endpoint (more reliable from within container)
+      // Check via HTTP endpoint - if it fails, container is likely stopped/removed
       // Try Docker service name first (works within Docker network)
       const isFrontendHealthyViaService = await checkHttpEndpoint('http://frontend:3000');
       // Also try localhost (works if backend can reach host)
@@ -168,31 +209,21 @@ setupRouter.get('/progress', async (req, res) => {
         service.progress = 100;
         service.message = 'Frontend is accessible (Vite dev server active)';
       } else {
-        // If HTTP check fails, try to check container status via docker command
-        // This might fail if Docker socket is not accessible, so we'll use a fallback
-        try {
-          const containerStatus = await checkContainerStatus(service.containerName);
-          if (containerStatus === 'running') {
-            service.status = 'starting';
-            service.progress = 85;
-            service.message = 'Frontend container running, waiting for Vite to respond...';
-          } else if (containerStatus === 'stopped') {
-            service.status = 'installing';
-            service.progress = 30;
-            service.message = 'Frontend container exists but not running';
-          } else {
-            // Container not found or status unknown - assume it's starting
-            // This is common when backend can't access Docker socket
-            service.status = 'starting';
-            service.progress = 70;
-            service.message = 'Frontend starting up...';
-          }
-        } catch {
-          // Docker command failed (likely no socket access) - use HTTP-only check
-          // If HTTP also fails, assume starting
+        // HTTP check failed - check container status if possible
+        const containerStatus = await checkContainerStatus(service.containerName);
+        if (containerStatus === 'not-found') {
+          service.status = 'error';
+          service.progress = 0;
+          service.message = 'Container not found (may have been removed)';
+        } else if (containerStatus === 'stopped') {
+          service.status = 'unhealthy';
+          service.progress = 0;
+          service.message = 'Container stopped';
+        } else {
+          // Container might be running but not ready, or Docker check failed
           service.status = 'starting';
-          service.progress = 70;
-          service.message = 'Frontend starting up...';
+          service.progress = 85;
+          service.message = 'Frontend container running, waiting for Vite to respond...';
         }
       }
     }
@@ -247,18 +278,31 @@ setupRouter.get('/progress', async (req, res) => {
     },
   };
 
-  res.json({
-    services,
-    overallProgress: Math.round(overallProgress),
-    allHealthy,
-    endpoints,
-    timestamp: new Date().toISOString(),
-  });
+    res.json({
+      services,
+      overallProgress: Math.round(overallProgress),
+      allHealthy,
+      endpoints,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('Error in /progress endpoint:', error);
+    res.status(500).json({
+      error: 'Failed to fetch progress',
+      message: error instanceof Error ? error.message : 'Unknown error',
+      services: [],
+      overallProgress: 0,
+      allHealthy: false,
+      endpoints: {},
+      timestamp: new Date().toISOString(),
+    });
+  }
 });
 
 // Components/Software list endpoint
 setupRouter.get('/components', async (req, res) => {
-  const components = [
+  try {
+    const components = [
     {
       name: 'Node.js',
       version: process.version,
@@ -428,7 +472,15 @@ setupRouter.get('/components', async (req, res) => {
     console.error('Could not read package.json files:', error);
   }
 
-  res.json({ components });
+    res.json({ components });
+  } catch (error) {
+    console.error('Error in /components endpoint:', error);
+    res.status(500).json({
+      error: 'Failed to fetch components',
+      message: error instanceof Error ? error.message : 'Unknown error',
+      components: [],
+    });
+  }
 });
 
 // Test results endpoint

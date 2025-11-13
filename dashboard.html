@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wander Developer Environment - Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .pulse-animation {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <div class="bg-white rounded-lg shadow-lg p-6 mb-6">
+            <h1 class="text-3xl font-bold text-gray-800 mb-2">Wander Developer Environment</h1>
+            <p class="text-gray-600">Monitoring Installation Progress</p>
+        </div>
+
+        <!-- Overall Progress -->
+        <div class="bg-white rounded-lg shadow-lg p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4">Overall Progress</h2>
+            <div class="w-full bg-gray-200 rounded-full h-4 mb-2">
+                <div id="overall-progress" class="bg-blue-600 h-4 rounded-full transition-all duration-300" style="width: 0%"></div>
+            </div>
+            <div class="flex justify-between text-sm text-gray-600">
+                <span id="progress-text">0%</span>
+                <span id="status-text" class="font-semibold">Initializing...</span>
+            </div>
+            <div class="mt-4 text-sm text-gray-500">
+                <span>Elapsed Time: </span>
+                <span id="elapsed-time">0s</span>
+            </div>
+        </div>
+
+        <!-- Services Status -->
+        <div class="bg-white rounded-lg shadow-lg p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4">Services Status</h2>
+            <div id="services-list" class="space-y-4">
+                <!-- Services will be populated here -->
+            </div>
+        </div>
+
+        <!-- Connection Endpoints -->
+        <div class="bg-white rounded-lg shadow-lg p-6">
+            <h2 class="text-xl font-semibold mb-4">Connection Endpoints</h2>
+            <div id="endpoints-list" class="space-y-3">
+                <!-- Endpoints will be populated here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:8081';
+        let startTime = Date.now();
+
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+        }
+
+        function getStatusColor(status) {
+            switch(status) {
+                case 'healthy': return 'bg-green-500';
+                case 'starting': case 'installing': return 'bg-blue-500';
+                case 'unhealthy': case 'error': return 'bg-red-500';
+                default: return 'bg-gray-300';
+            }
+        }
+
+        function getStatusIcon(status) {
+            switch(status) {
+                case 'healthy': return '✅';
+                case 'starting': return '🔄';
+                case 'installing': return '📦';
+                case 'unhealthy': case 'error': return '❌';
+                default: return '⏳';
+            }
+        }
+
+        function updateElapsedTime() {
+            const elapsed = Math.floor((Date.now() - startTime) / 1000);
+            document.getElementById('elapsed-time').textContent = formatTime(elapsed);
+        }
+
+        function updateServices(services) {
+            const container = document.getElementById('services-list');
+            container.innerHTML = services.map(service => `
+                <div class="border rounded-lg p-4">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="flex items-center space-x-3">
+                            <span class="text-2xl">${getStatusIcon(service.status)}</span>
+                            <span class="font-semibold">${service.name}</span>
+                        </div>
+                        <span class="text-sm text-gray-600">${service.progress}%</span>
+                    </div>
+                    <div class="w-full bg-gray-200 rounded-full h-2 mb-2">
+                        <div class="${getStatusColor(service.status)} h-2 rounded-full transition-all duration-300" style="width: ${service.progress}%"></div>
+                    </div>
+                    <p class="text-sm text-gray-600">${service.message}</p>
+                </div>
+            `).join('');
+        }
+
+        function updateEndpoints(endpoints) {
+            const container = document.getElementById('endpoints-list');
+            container.innerHTML = Object.entries(endpoints).map(([key, endpoint]) => `
+                <div class="border rounded-lg p-3">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <span class="font-semibold">${endpoint.description || key}</span>
+                            ${endpoint.url ? `<div class="text-sm text-blue-600">${endpoint.url}</div>` : ''}
+                            ${endpoint.connectionString ? `<div class="text-sm text-blue-600">${endpoint.connectionString}</div>` : ''}
+                            ${endpoint.host ? `<div class="text-sm text-gray-600">${endpoint.host}:${endpoint.port}</div>` : ''}
+                        </div>
+                        <span class="px-2 py-1 rounded text-xs ${endpoint.status === 'ready' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}">
+                            ${endpoint.status === 'ready' ? '✓ Ready' : '⏳ Starting'}
+                        </span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function fetchProgress() {
+            try {
+                const response = await fetch(`${API_URL}/api/setup/progress`);
+                const data = await response.json();
+
+                // Update overall progress
+                document.getElementById('overall-progress').style.width = `${data.overallProgress}%`;
+                document.getElementById('progress-text').textContent = `${data.overallProgress}%`;
+                document.getElementById('status-text').textContent = data.allHealthy ? '✅ All Services Ready' : '⏳ Services Starting...';
+                document.getElementById('status-text').className = data.allHealthy ? 'font-semibold text-green-600' : 'font-semibold text-blue-600';
+
+                // Update services
+                updateServices(data.services);
+
+                // Update endpoints
+                if (data.endpoints) {
+                    updateEndpoints(data.endpoints);
+                }
+            } catch (error) {
+                console.error('Failed to fetch progress:', error);
+                document.getElementById('status-text').textContent = '❌ Cannot connect to dashboard backend';
+                document.getElementById('status-text').className = 'font-semibold text-red-600';
+            }
+        }
+
+        // Update elapsed time every second
+        setInterval(updateElapsedTime, 1000);
+
+        // Fetch progress every 2 seconds
+        fetchProgress();
+        setInterval(fetchProgress, 2000);
+    </script>
+</body>
+</html>
+

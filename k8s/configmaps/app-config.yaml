@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: wander
+data:
+  NODE_ENV: "production"
+  POSTGRES_HOST: "postgres-service"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "wander_dev"
+  POSTGRES_USER: "wander"
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
+  API_PORT: "8080"
+  API_HOST: "0.0.0.0"
+  VITE_API_URL: "http://backend-service:8080"
+
