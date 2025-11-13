@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
       - name: static-app
-        image: 971422717446.dkr.ecr.us-west-2.amazonaws.com/wander-static-app:latest
+        image: 971422717446.dkr.ecr.us-west-2.amazonaws.com/wander-static-app:2025.11.13-055759
         # This will be automatically updated by GitHub Actions
         ports:
         - containerPort: 80
